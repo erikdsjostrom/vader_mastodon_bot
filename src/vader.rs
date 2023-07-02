@@ -199,25 +199,55 @@ impl Weather {
 
 impl ToString for Weather {
     fn to_string(&self) -> String {
-        format!(
-            "{}\nTemp min/max: {}/{}°C\nSoltimmar: {}\nUV-index {}: {}",
-            // self.weather_condition_for_the_day(),
+        let mut s = format!(
+            "{}\nTemp min/max: {}/{}°C\nSolnedgång: {}",
             self.weather_report(),
             self.min_temp_c,
             self.max_temp_c,
-            self.sun_hour,
-            self.uv_index,
-            explain_uv_index(self.uv_index.parse().unwrap_or_default())
-        )
+            twelve_hour_to_24(&self.astronomy[0].sunset)
+        );
+        if let Some(uv) = self.uv_index.parse::<u8>().ok() {
+            if uv > 5 {
+                s = format!("{}\n{}", s, explain_uv_index(uv))
+            }
+        };
+        if let Some(snow) = self.total_snow_cm.parse::<f32>().ok() {
+            if snow > 0.0 {
+                s = format!("{}\nSnö: {}cm", s, snow)
+            }
+        };
+        // TODO: Make lib function
+        let rain: f32 = self.hourly[2..]
+            .iter()
+            .map(|h| h.precip_mm.parse::<f32>().unwrap())
+            .sum();
+        if rain > 0.0 {
+            s = format!("{}\nNederbörd: {}mm", s, rain)
+        };
+        s
     }
+}
+
+fn twelve_hour_to_24(time: &str) -> String {
+    let mut parts = time.split_whitespace();
+    let mut time_parts = parts.next().unwrap().split(':');
+    let hour = time_parts.next().unwrap().parse::<u8>().unwrap();
+    let minute = time_parts.next().unwrap().parse::<u8>().unwrap();
+    let am_pm = parts.next().unwrap();
+    let hour = match am_pm {
+        "AM" => hour,
+        "PM" => hour + 12,
+        _ => panic!("Unknown time format"),
+    };
+    format!("{:02}:{:02}", hour, minute)
 }
 
 fn explain_uv_index(uv_index: u8) -> &'static str {
     match uv_index {
         0..=2 => "Lågt UV-index. Minimalt solskydd krävs.",
-        3..=5 => "Måttligt UV-index. Sök skugga under middagstimmen, använd solskyddsmedel.",
+        3..=5 => "Måttligt UV-index. Sök skugga vid zenit, använd solskyddsmedel.",
         6..=7 => "Högt UV-index. Minska solexponeringen mellan kl. 10 och 16, använd solskyddsmedel med SPF 30+.",
-        8..=10 => "Mycket högt UV-index. Ta extra försiktighet. Minimera solexponeringen.",
+        8..=10 => "Mycket högt UV-index. Ta det försiktigt. Minimera solexponeringen.",
         _ => "Extremt UV-index. Undvik att vara utomhus. Solskydd är nödvändigt.",
     }
 }
@@ -412,6 +442,8 @@ pub enum WeatherCondition {
     PatchyLightSnowWithThunder,
     #[serde(rename = "Moderate or heavy snow with thunder")]
     ModerateOrHeavySnowWithThunder,
+    #[serde(rename = "Shower in vicinity")]
+    ShowerInVicinity,
     // Simplified, not part of the wttr API
     Rainy,
     Snowy,
@@ -468,6 +500,7 @@ impl WeatherCondition {
             | WeatherCondition::ModerateOrHeavySnowWithThunder => BaseWeather::Snow,
 
             WeatherCondition::PatchyRainPossible
+            | WeatherCondition::ShowerInVicinity
             | WeatherCondition::LightDrizzle
             | WeatherCondition::FreezingDrizzle
             | WeatherCondition::HeavyFreezingDrizzle
